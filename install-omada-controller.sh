@@ -8,7 +8,7 @@
 
 echo -e "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo "TP-Link Omada Software Controller - Installer"
-echo "https://github.com/monsn0/omada-installer"
+echo "https://github.com/llegomark/omada-installer"
 echo -e "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
 
 echo "[+] Verifying running as root"
@@ -84,35 +84,19 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Determine the name of the folder inside the zip (usually same as zip name without .zip)
-# Example: Omada_SDN_Controller_v5.15.24.14_pre-release_linux_x64_deb
-InnerFolderName="${OmadaZipBasename%.zip}"
-PathToDebFolder="$OmadaExtractDir/$InnerFolderName"
-
-if [ ! -d "$PathToDebFolder" ]; then
-    echo -e "\e[1;31m[!] Expected subfolder '$InnerFolderName' not found in '$OmadaExtractDir' after unzipping. \e[0m"
-    echo "[~] Contents of '$OmadaExtractDir':"
-    ls -lA "$OmadaExtractDir"
-    rm -f "$OmadaZipPath"
-    rm -rf "$OmadaExtractDir"
-    exit 1
-fi
-
-# Find the .deb file within the specific subfolder
-# Using -maxdepth 1 because the .deb is directly in that folder
-# Using -type f to ensure it's a file
-OmadaDebFile=$(find "$PathToDebFolder" -maxdepth 1 -type f -name '*.deb' -print -quit)
+OmadaDebFile=$(find "$OmadaExtractDir" -maxdepth 1 -type f -name '*.deb' -print -quit)
 
 if [ -z "$OmadaDebFile" ] || [ ! -f "$OmadaDebFile" ]; then
-    echo -e "\e[1;31m[!] Could not find .deb file inside '$PathToDebFolder'. \e[0m"
-    echo "[~] Contents of '$PathToDebFolder':"
-    ls -lA "$PathToDebFolder"
+    echo -e "\e[1;31m[!] Could not find .deb file directly in '$OmadaExtractDir'. \e[0m"
+    echo "[~] Contents of '$OmadaExtractDir':"
+    ls -lA "$OmadaExtractDir" # List contents for debugging
     rm -f "$OmadaZipPath"
     rm -rf "$OmadaExtractDir"
     exit 1
 fi
 OmadaDebBasename=$(basename "$OmadaDebFile")
 echo "[~] Found .deb file: $OmadaDebFile"
+
 
 # Package dependencies
 echo "[+] Installing MongoDB 8.0"
@@ -139,8 +123,8 @@ fi
 # Extract version like "v5.15.24.14" from "omada_v5.15.24.14_linux_x64_20250512094910.deb"
 OmadaVersion=$(echo "$OmadaDebBasename" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
 if [ -z "$OmadaVersion" ]; then
-    # Fallback if grep fails, try the old method (might be incorrect for new name)
-    OmadaVersion=$(echo "$OmadaDebBasename" | tr "_" "\n" | sed -n '2p') # 2nd field for new name
+    # Fallback if grep fails, try to extract from part between first and second underscore
+    OmadaVersion=$(echo "$OmadaDebBasename" | cut -d'_' -f2)
 fi
 
 echo "[+] Installing Omada Software Controller ${OmadaVersion:-$OmadaDebBasename}" # Display version or full name
