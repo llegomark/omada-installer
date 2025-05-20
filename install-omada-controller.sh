@@ -1,10 +1,10 @@
 #!/bin/bash
 #title           :install-omada-controller.sh
-#description     :Installer for TP-Link Omada Software Controller
+#description     :Installer for TP-Link Omada Software Controller V5.15.24 Pre-Release Firmware
 #supported       :Ubuntu 20.04, Ubuntu 22.04, Ubuntu 24.04
 #author          :monsn0
-#date            :2021-07-29
-#updated         :2024-05-23 # <-- Updated date
+#date            :2025-05-20
+#updated         :2025-05-14
 
 echo -e "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo "TP-Link Omada Software Controller - Installer"
@@ -45,7 +45,7 @@ apt-get -qq install gnupg curl unzip &> /dev/null
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to install script prerequisites. Check apt output. \e[0m"
     # Try again with output visible
-    apt-get install gnupg curl unzip
+    apt-get install -y gnupg curl unzip
     if [ $? -ne 0 ]; then
       echo -e "\e[1;31m[!] Prerequisite installation failed again. Exiting. \e[0m"
       exit 1
@@ -74,23 +74,39 @@ fi
 
 echo "[+] Extracting the Omada Software Controller .deb file"
 mkdir -p "$OmadaExtractDir"
-# -q for quiet, -o to overwrite existing files without prompting (good for reruns if needed)
+# -q for quiet, -o to overwrite existing files without prompting
 # -d to specify extraction directory
 unzip -qo "$OmadaZipPath" -d "$OmadaExtractDir"
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to unzip Omada Controller package. \e[0m"
-    rm -f "$OmadaZipPath" # Clean up downloaded zip
-    rm -rf "$OmadaExtractDir" # Clean up (potentially partially) extracted dir
+    rm -f "$OmadaZipPath"
+    rm -rf "$OmadaExtractDir"
     exit 1
 fi
 
-# Find the .deb file within the extracted directory
-# Using -quit to stop after the first find; assumes only one .deb of interest
-OmadaDebFile=$(find "$OmadaExtractDir" -name '*.deb' -print -quit)
+# Determine the name of the folder inside the zip (usually same as zip name without .zip)
+# Example: Omada_SDN_Controller_v5.15.24.14_pre-release_linux_x64_deb
+InnerFolderName="${OmadaZipBasename%.zip}"
+PathToDebFolder="$OmadaExtractDir/$InnerFolderName"
+
+if [ ! -d "$PathToDebFolder" ]; then
+    echo -e "\e[1;31m[!] Expected subfolder '$InnerFolderName' not found in '$OmadaExtractDir' after unzipping. \e[0m"
+    echo "[~] Contents of '$OmadaExtractDir':"
+    ls -lA "$OmadaExtractDir"
+    rm -f "$OmadaZipPath"
+    rm -rf "$OmadaExtractDir"
+    exit 1
+fi
+
+# Find the .deb file within the specific subfolder
+# Using -maxdepth 1 because the .deb is directly in that folder
+# Using -type f to ensure it's a file
+OmadaDebFile=$(find "$PathToDebFolder" -maxdepth 1 -type f -name '*.deb' -print -quit)
 
 if [ -z "$OmadaDebFile" ] || [ ! -f "$OmadaDebFile" ]; then
-    echo -e "\e[1;31m[!] Could not find .deb file in the unzipped package at $OmadaExtractDir. \e[0m"
-    ls -R "$OmadaExtractDir" # List contents for debugging
+    echo -e "\e[1;31m[!] Could not find .deb file inside '$PathToDebFolder'. \e[0m"
+    echo "[~] Contents of '$PathToDebFolder':"
+    ls -lA "$PathToDebFolder"
     rm -f "$OmadaZipPath"
     rm -rf "$OmadaExtractDir"
     exit 1
@@ -98,42 +114,46 @@ fi
 OmadaDebBasename=$(basename "$OmadaDebFile")
 echo "[~] Found .deb file: $OmadaDebFile"
 
-
 # Package dependencies
 echo "[+] Installing MongoDB 8.0"
-apt-get -qq install mongodb-org # Removed &> /dev/null to see potential errors
+apt-get -qq install -y mongodb-org
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to install MongoDB. Check apt output. \e[0m"
     exit 1
 fi
 
 echo "[+] Installing OpenJDK 21 JRE (headless)"
-apt-get -qq install openjdk-21-jre-headless # Removed &> /dev/null
+apt-get -qq install -y openjdk-21-jre-headless
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to install OpenJDK. Check apt output. \e[0m"
     exit 1
 fi
 
 echo "[+] Installing JSVC"
-apt-get -qq install jsvc # Removed &> /dev/null
+apt-get -qq install -y jsvc
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to install JSVC. Check apt output. \e[0m"
     exit 1
 fi
 
-echo "[+] Installing Omada Software Controller $(echo "$OmadaDebBasename" | tr "_" "\n" | sed -n '4p')"
-dpkg -i "$OmadaDebFile" # Removed &> /dev/null to see potential errors
+# Extract version like "v5.15.24.14" from "omada_v5.15.24.14_linux_x64_20250512094910.deb"
+OmadaVersion=$(echo "$OmadaDebBasename" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)
+if [ -z "$OmadaVersion" ]; then
+    # Fallback if grep fails, try the old method (might be incorrect for new name)
+    OmadaVersion=$(echo "$OmadaDebBasename" | tr "_" "\n" | sed -n '2p') # 2nd field for new name
+fi
+
+echo "[+] Installing Omada Software Controller ${OmadaVersion:-$OmadaDebBasename}" # Display version or full name
+dpkg -i "$OmadaDebFile"
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to install Omada Controller .deb package. \e[0m"
     echo -e "\e[1;33m[~] Attempting to fix broken dependencies with 'apt-get -f install'... \e[0m"
     apt-get -f -y install
-    # Retry installing Omada if apt-get -f install succeeded
     if [ $? -eq 0 ]; then
         echo "[+] Retrying Omada Software Controller installation..."
         dpkg -i "$OmadaDebFile"
         if [ $? -ne 0 ]; then
             echo -e "\e[1;31m[!] Failed to install Omada Controller .deb package even after 'apt-get -f install'. \e[0m"
-            # Clean up before exiting
             echo "[+] Cleaning up downloaded and extracted files..."
             rm -f "$OmadaZipPath"
             rm -rf "$OmadaExtractDir"
@@ -141,7 +161,6 @@ if [ $? -ne 0 ]; then
         fi
     else
         echo -e "\e[1;31m[!] 'apt-get -f install' failed. Cannot install Omada Controller. \e[0m"
-        # Clean up before exiting
         echo "[+] Cleaning up downloaded and extracted files..."
         rm -f "$OmadaZipPath"
         rm -rf "$OmadaExtractDir"
@@ -154,7 +173,7 @@ echo "[+] Cleaning up downloaded and extracted files..."
 rm -f "$OmadaZipPath"
 rm -rf "$OmadaExtractDir"
 
-hostIP=$(hostname -I | awk '{print $1}') # awk '{print $1}' is more robust than cut
+hostIP=$(hostname -I | awk '{print $1}')
 echo -e "\e[0;32m[~] Omada Software Controller has been successfully installed! :)\e[0m"
 echo -e "\e[0;32m[~] Please visit https://${hostIP}:8043 to complete the inital setup wizard.\e[0m\n"
 
