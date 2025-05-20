@@ -59,7 +59,7 @@ echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gp
 apt-get -qq update
 
 echo "[+] Downloading the Omada Software Controller package (ZIP)"
-# New URL for the ZIP file
+# URL for the specific ZIP file
 OmadaZipPackageUrl="https://static.tp-link.com/upload/beta/2025/202505/20250514/Omada_SDN_Controller_v5.15.24.14_pre-release_linux_x64_deb.zip"
 OmadaZipBasename=$(basename "$OmadaZipPackageUrl")
 OmadaZipPath="/tmp/$OmadaZipBasename"
@@ -84,6 +84,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Find the .deb file directly within the extraction directory.
 OmadaDebFile=$(find "$OmadaExtractDir" -maxdepth 1 -type f -name '*.deb' -print -quit)
 
 if [ -z "$OmadaDebFile" ] || [ ! -f "$OmadaDebFile" ]; then
@@ -104,6 +105,26 @@ apt-get -qq install -y mongodb-org
 if [ $? -ne 0 ]; then
     echo -e "\e[1;31m[!] Failed to install MongoDB. Check apt output. \e[0m"
     exit 1
+fi
+
+echo "[+] Enabling MongoDB to start on boot"
+systemctl enable mongod
+if [ $? -ne 0 ]; then
+    echo -e "\e[1;33m[~] Warning: Failed to enable mongod service for autostart. You may need to do this manually: sudo systemctl enable mongod \e[0m"
+else
+    echo "[~] mongod service enabled for autostart."
+fi
+
+echo "[+] Starting MongoDB service for the current session"
+systemctl start mongod
+# Check if mongod started successfully
+if ! systemctl is-active --quiet mongod; then
+    echo -e "\e[1;31m[!] Failed to start mongod service. Omada Controller installation might fail. \e[0m"
+    echo "[~] Please check MongoDB status with: sudo systemctl status mongod"
+    # Consider if script should exit here if Omada absolutely needs mongod running pre-install
+    # For now, proceed with warning.
+else
+    echo "[~] mongod service started successfully."
 fi
 
 echo "[+] Installing OpenJDK 21 JRE (headless)"
